@@ -58,12 +58,12 @@ public partial class TaskForm : Form
     private void BuildUI()
     {
         this.Text            = "Assign Task";
-        this.Size            = new Size(560, 560);
-        this.MinimumSize     = new Size(520, 520);
+        this.Size            = new Size(580, 620);
+        this.MinimumSize     = new Size(540, 580);
         this.BackColor       = BgDark;
         this.ForeColor       = TextPrimary;
         this.StartPosition   = FormStartPosition.CenterParent;
-        this.FormBorderStyle = FormBorderStyle.FixedSingle;
+        this.FormBorderStyle = FormBorderStyle.Sizable;
         this.MaximizeBox     = false;
         this.DoubleBuffered  = true;
 
@@ -82,33 +82,46 @@ public partial class TaskForm : Form
             Text = "Assign a task to an approved member of your society.",
             Font = FontSmall, ForeColor = TextMuted, AutoSize = true, Location = new Point(24, 46)
         });
-        this.Controls.Add(header);
-
-        // Divider
-        this.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 1, BackColor = Border });
-
+     
         // Body
         Panel body = new Panel
         {
-            Dock = DockStyle.Fill, BackColor = BgDark,
-            Padding = new Padding(28, 18, 28, 18), AutoScroll = true
+            Dock       = DockStyle.Fill,
+            BackColor  = BgDark,
+            Padding    = new Padding(28, 18, 28, 18),
+            AutoScroll = true,
         };
         this.Controls.Add(body);
+   // Divider
+        this.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 1, BackColor = Border });
+this.Controls.Add(header);
 
-        int y = 14;
+        // Inner panel holds all controls at fixed layout so AutoScroll works
+        Panel inner = new Panel
+        {
+            BackColor  = BgDark,
+            AutoScroll = false,
+            Location   = new Point(0, 0),
+            Padding = new Padding(28, 18, 28, 18),
+            Width      = 490,
+            Height     = 600,  // tall enough for all controls; trimmed after layout
+        };
+        body.Controls.Add(inner);
+
+        int y = 0;
 
         // Title
-        body.Controls.Add(MakeLabel("Task Title *", new Point(0, y)));        y += 24;
+        inner.Controls.Add(MakeLabel("Task Title *", new Point(0, y)));        y += 24;
         TextBox txtTitle = MakeTextBox(new Point(0, y), 490);
-        body.Controls.Add(txtTitle);                                           y += txtTitle.Height + 16;
+        inner.Controls.Add(txtTitle);                                           y += txtTitle.Height + 16;
 
         // Description
-        body.Controls.Add(MakeLabel("Description", new Point(0, y)));          y += 24;
+        inner.Controls.Add(MakeLabel("Description", new Point(0, y)));          y += 24;
         TextBox txtDesc = MakeTextBox(new Point(0, y), 490, 100, multiline: true);
-        body.Controls.Add(txtDesc);                                            y += txtDesc.Height + 16;
+        inner.Controls.Add(txtDesc);                                            y += txtDesc.Height + 16;
 
         // Assign To
-        body.Controls.Add(MakeLabel("Assign To (Approved Member) *", new Point(0, y))); y += 24;
+        inner.Controls.Add(MakeLabel("Assign To (Approved Member) *", new Point(0, y))); y += 24;
         ComboBox cmbAssignee = new ComboBox
         {
             Location      = new Point(0, y),
@@ -119,10 +132,10 @@ public partial class TaskForm : Form
             FlatStyle     = FlatStyle.Flat,
             DropDownStyle = ComboBoxStyle.DropDownList,
         };
-        body.Controls.Add(cmbAssignee);                                        y += cmbAssignee.Height + 16;
+        inner.Controls.Add(cmbAssignee);                                        y += cmbAssignee.Height + 16;
 
         // Due Date
-        body.Controls.Add(MakeLabel("Due Date *", new Point(0, y)));           y += 24;
+        inner.Controls.Add(MakeLabel("Due Date *", new Point(0, y)));           y += 24;
         DateTimePicker dtpDue = new DateTimePicker
         {
             Location = new Point(0, y),
@@ -132,7 +145,7 @@ public partial class TaskForm : Form
             MinDate  = DateTime.Today.AddDays(1),
             Value    = DateTime.Today.AddDays(7),
         };
-        body.Controls.Add(dtpDue);                                             y += dtpDue.Height + 26;
+        inner.Controls.Add(dtpDue);                                             y += dtpDue.Height + 26;
 
         // Buttons
         Button btnSave = MakeButton("  ✔  Assign Task", AccentGreen, new Point(0, y), 200);
@@ -150,7 +163,12 @@ public partial class TaskForm : Form
         btnCancel.FlatAppearance.BorderColor        = Color.FromArgb(60, AccentRed.R, AccentRed.G, AccentRed.B);
         btnCancel.FlatAppearance.BorderSize         = 1;
         btnCancel.FlatAppearance.MouseOverBackColor = Color.FromArgb(55, AccentRed.R, AccentRed.G, AccentRed.B);
-        body.Controls.AddRange(new Control[] { btnSave, btnCancel });
+        inner.Controls.AddRange(new Control[] { btnSave, btnCancel });
+        y += btnSave.Height + 16;
+        inner.Height = y + 20;   // trim to actual content
+
+        // Keep inner width in sync with body (accounts for scrollbar)
+        body.Resize += (s, e) => inner.Width = Math.Max(body.ClientSize.Width - body.Padding.Left - body.Padding.Right, 200);
 
         // ── Load members after controls are created ────────────────────────
         LoadMembers(cmbAssignee);

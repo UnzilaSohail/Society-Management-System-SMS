@@ -130,7 +130,7 @@ public partial class EventForm : Form
             content.Left = (body.ClientSize.Width - content.Width) / 2;
         };
 
-        int y = 24;
+        int y = 0;
 
         // Title
         content.Controls.Add(MakeLabel("Event Title", new Point(0, y)));
@@ -240,8 +240,12 @@ body.AutoScrollPosition = new Point(0, 0);
         }
         else
         {
-            query = @"UPDATE Events SET Title=@Title, Description=@Description,
-                      EventDate=@EventDate, Location=@Location WHERE EventID=@EventID";
+          // Change the update query to also reset Status to Pending:
+query = @"UPDATE Events 
+          SET Title=@Title, Description=@Description,
+              EventDate=@EventDate, Location=@Location,
+              Status='Pending'
+          WHERE EventID=@EventID";
         }
 
         SqlParameter[] p = {

@@ -71,6 +71,9 @@ public partial class StudentDashboard : Form
     // ── Navigation sections ────────────────────────────────────────────────
     private readonly (string icon, string label, Color accent, Action<Panel> render)[] sections;
 
+    // Designer stub — no .Designer.cs file required
+
+
     // ══════════════════════════════════════════════════════════════════════
     //  Constructor
     // ══════════════════════════════════════════════════════════════════════
@@ -210,8 +213,17 @@ public partial class StudentDashboard : Form
         statusBar.Controls.Add(statusBarLabel);
         rightCol.Controls.Add(statusBar);
 
-        // Main scrollable panel — NO padding here; each section renders its own inner content panel
-        mainPanel = new Panel { Dock = DockStyle.Fill, BackColor = BgDark, AutoScroll = true, Padding = new Padding(0) };
+        // Main scrollable panel — AutoScroll=true so content taller than the
+        // viewport gets a vertical scroll bar. Individual section renderers
+        // create a child panel sized to their full content height.
+        mainPanel = new Panel
+        {
+            Height= 52, // start with some height to show the scroll bar; adjusted by content
+            Dock       = DockStyle.Fill,
+            BackColor  = BgDark,
+            AutoScroll = true,
+            Padding    = new Padding(0,60,0,0),
+        };
         rightCol.Controls.Add(mainPanel);
 
         UpdateStatusBar();
@@ -221,43 +233,64 @@ public partial class StudentDashboard : Form
     private void Navigate(int idx)
     {
         SetActiveNav(idx);
+        // Remove all controls AND detach any Resize handlers from previous navigation
         mainPanel.Controls.Clear();
+        mainPanel.AutoScroll = true;
 
-        // ── Content wrapper ────────────────────────────────────────────────
-        // Use a Docked panel so it always fills mainPanel correctly.
-        // Padding gives the visual margin; all section renderers receive THIS
-        // panel as their host, so host.ClientSize.Width is the usable width.
+        // ── Scrollable content wrapper ─────────────────────────────────────
+        // AutoScrollMinSize drives the vertical scroll thumb.
+        // We give the wrapper a fixed large height so the scroll bar appears;
+        // it will be corrected after the section renders.
         Panel content = new Panel
         {
-            Dock      = DockStyle.Top,
-            BackColor = BgDark,
-            Padding   = new Padding(32, 24, 32, 32),
-            // Height will be set after section renders (see below)
-            Width     = mainPanel.ClientSize.Width,
+            BackColor  = BgDark,
+            Padding    = new Padding(32, 24, 32, 40),
+            AutoSize   = false,
+            AutoScroll = false,
         };
-        mainPanel.Controls.Add(content);
+        content.Width  = mainPanel.ClientSize.Width;
+        content.Height = mainPanel.ClientSize.Height; // start at viewport size; expanded below
 
-        // Render the section; it appends controls and tracks `y`
+        mainPanel.Controls.Add(content);
+        content.Location = new Point(0, 0);
+
+        // Render the section; it appends controls using absolute-y positioning
         sections[idx].render(content);
 
-        // Size the wrapper to contain all rendered children + bottom padding
+        // ── Measure actual content height and set scroll size ──────────────
         int maxBottom = 0;
         foreach (Control c in content.Controls)
         {
             int b = c.Bottom + content.Padding.Bottom;
             if (b > maxBottom) maxBottom = b;
         }
-        content.Height = Math.Max(maxBottom + 40, mainPanel.ClientSize.Height);
+        int requiredH = maxBottom + 40;
+        content.Height = requiredH;
+        // Make the DataGridViews fill the available width
+        AdjustContentWidth(content);
 
-        // Keep wrapper width in sync when form is resized
-        mainPanel.Resize += (s, e) =>
+        // ── Keep everything in sync on form resize ─────────────────────────
+        EventHandler resizeHandler = null!;
+        resizeHandler = (s, e) =>
         {
             content.Width = mainPanel.ClientSize.Width;
-            // Resize grids that use Anchor
-            foreach (Control c in content.Controls)
-                if (c is DataGridView dgv)
-                    dgv.Width = content.ClientSize.Width;
+            AdjustContentWidth(content);
         };
+        mainPanel.Resize += resizeHandler;
+        // Clean up when we navigate away
+        content.Disposed += (s, e) => mainPanel.Resize -= resizeHandler;
+    }
+
+    private static void AdjustContentWidth(Panel content)
+    {
+        int w = content.ClientSize.Width;
+        foreach (Control c in content.Controls)
+        {
+            if (c is DataGridView dgv)
+                dgv.Width = w;
+            else if (c.Anchor.HasFlag(AnchorStyles.Right))
+                c.Width = w;
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -292,7 +325,7 @@ public partial class StudentDashboard : Form
 
         DataGridView dgv = StyledGrid();
         dgv.Location = new Point(0, y);
-        dgv.Size     = new Size(host.ClientSize.Width, 420);
+        dgv.Size     = new Size(host.ClientSize.Width, 340);
         host.Controls.Add(dgv);
         LoadSocietiesGrid(dgv);
 
@@ -393,7 +426,7 @@ public partial class StudentDashboard : Form
 
         DataGridView dgv = StyledGrid();
         dgv.Location = new Point(0, y);
-        dgv.Size     = new Size(host.ClientSize.Width, 420);
+        dgv.Size     = new Size(host.ClientSize.Width, 340);
         host.Controls.Add(dgv);
         LoadEventsGrid(dgv);
 
@@ -487,7 +520,7 @@ public partial class StudentDashboard : Form
 
         DataGridView dgv = StyledGrid();
         dgv.Location = new Point(0, y);
-        dgv.Size     = new Size(host.ClientSize.Width, 420);
+        dgv.Size     = new Size(host.ClientSize.Width, 340);
         host.Controls.Add(dgv);
         LoadMembershipsGrid(dgv);
 
@@ -592,7 +625,7 @@ public partial class StudentDashboard : Form
 
         DataGridView dgv = StyledGrid();
         dgv.Location = new Point(0, y);
-        dgv.Size     = new Size(host.ClientSize.Width, 420);
+        dgv.Size     = new Size(host.ClientSize.Width, 340);
         host.Controls.Add(dgv);
         LoadTicketsGrid(dgv);
 

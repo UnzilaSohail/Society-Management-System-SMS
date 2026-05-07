@@ -244,30 +244,57 @@ public partial class AdminDashboard : Form
         Panel toolbar = new Panel { BackColor = Color.Transparent, Height = 104, Width = 900 };
         toolbar.Location = new Point(0, statsRow.Bottom + 18);
 
-        Button btnApprove = ActionButton("✔ Approve",  AccentGreen, 120);
-        Button btnSuspend = ActionButton("⏸ Suspend",  AccentOrange, 120);
-        Button btnDelete  = ActionButton("🗑 Delete",   AccentRed, 120);
-        Button btnCreate  = ActionButton("＋ Create",   AccentBlue, 120);
-        Button btnRefresh = ActionButton("↻ Refresh",  TextMuted, 120);
-        btnApprove.Location = new Point(0,   6);
-        btnSuspend.Location = new Point(132, 6);
-        btnDelete.Location  = new Point(264, 6);
-        btnCreate.Location  = new Point(396, 6);
-        btnRefresh.Location = new Point(0,   50);
-        toolbar.Controls.AddRange(new Control[] { btnApprove, btnSuspend, btnDelete, btnCreate, btnRefresh });
+        Button btnApprove    = ActionButton("✔ Approve",     AccentGreen,  120);
+        Button btnSuspend    = ActionButton("⏸ Suspend",     AccentOrange, 120);
+        Button btnDelete     = ActionButton("🗑 Delete",      AccentRed,    120);
+        Button btnCreate     = ActionButton("＋ Create",      AccentBlue,   120);
+        Button btnAssignHead = ActionButton("👤 Assign Head", AccentPurple, 134);
+        Button btnRefresh    = ActionButton("↻ Refresh",     TextMuted,    120);
+
+        btnApprove.Location    = new Point(0,   6);
+        btnSuspend.Location    = new Point(132, 6);
+        btnDelete.Location     = new Point(264, 6);
+        btnCreate.Location     = new Point(396, 6);
+        btnAssignHead.Location = new Point(528, 6);
+        btnRefresh.Location    = new Point(0,   50);
+
+        toolbar.Controls.AddRange(new Control[] { btnApprove, btnSuspend, btnDelete, btnCreate, btnAssignHead, btnRefresh });
         host.Controls.Add(toolbar);
 
+        // dgv must be declared BEFORE any click handlers that close over it
         DataGridView dgv = StyledGrid();
         dgv.Location = new Point(0, toolbar.Bottom + 10);
         dgv.Size     = new Size(host.Width - 60, 420);
         host.Controls.Add(dgv);
         LoadSocieties(dgv);
 
-        btnApprove.Click += (s, e) => ApproveSociety(dgv);
-        btnSuspend.Click += (s, e) => SuspendSociety(dgv);
-        btnDelete.Click  += (s, e) => DeleteSociety(dgv);
-        btnCreate.Click  += (s, e) => CreateSociety(dgv);
-        btnRefresh.Click += (s, e) => LoadSocieties(dgv);
+        btnApprove.Click    += (s, e) => ApproveSociety(dgv);
+        btnSuspend.Click    += (s, e) => SuspendSociety(dgv);
+        btnDelete.Click     += (s, e) => DeleteSociety(dgv);
+        btnCreate.Click     += (s, e) => CreateSociety(dgv);
+        btnAssignHead.Click += (s, e) => AssignSocietyHead(dgv);
+        btnRefresh.Click    += (s, e) => LoadSocieties(dgv);
+    }
+
+    private void AssignSocietyHead(DataGridView dgv)
+    {
+        if (!HasSelection(dgv, "Select a society first.")) return;
+        int socId = (int)dgv.SelectedRows[0].Cells["SocietyID"].Value;
+        string headEmail = PromptHelper.ShowInput("Assign Society Head", "New Head's Email:");
+        if (string.IsNullOrWhiteSpace(headEmail)) return;
+        try
+        {
+            object result = DBHelper.ExecuteScalar(
+                "SELECT UserID FROM Users WHERE Email=@E AND Role='SocietyHead'",
+                new SqlParameter[] { new("@E", headEmail) });
+            if (result == null) { ShowError("No SocietyHead user found with that email."); return; }
+            DBHelper.ExecuteNonQuery(
+                "UPDATE Societies SET HeadID=@H WHERE SocietyID=@S",
+                new SqlParameter[] { new("@H", Convert.ToInt32(result)), new("@S", socId) });
+            ShowToast("Society head assigned successfully.");
+            LoadSocieties(dgv);
+        }
+        catch (Exception ex) { ShowError(ex.Message); }
     }
 
     // ─────────────────────────────────────────────

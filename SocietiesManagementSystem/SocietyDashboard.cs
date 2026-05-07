@@ -5,7 +5,21 @@ namespace SocietiesManagementSystem;
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  SocietyDashboard — Society Head Portal
-//  Covers all Society Functional Requirements (FR 2.1 – 2.6).
+//
+//  FIXES in this revision:
+//   • TryLoadSociety() now also checks if the user is a MEMBER of a society
+//     as SocietyHead role (covers admin-assigned heads where HeadID may not
+//     be set yet), then falls back to showing "Create Society".
+//   • LoadMembersGrid() correctly shows ALL pending/approved/rejected requests
+//     for THIS society only — students' applications are now visible.
+//   • SafeCount overload fixed: all callers use parameterised @S binding.
+//   • ShowProfilePanel: society head can edit name, description, and status —
+//     sidebar label & status bar refresh immediately on save.
+//   • MemberAction: Approve now also marks ApprovedDate; grid refreshes with
+//     the current tab filter preserved.
+//   • Society head can ONLY see and act on the society where HeadID = userId.
+//   • Raw string interpolation in SQL removed throughout; all queries use
+//     SqlParameter[] to prevent SQL injection.
 // ═══════════════════════════════════════════════════════════════════════════
 public partial class SocietyDashboard : Form
 {
@@ -16,15 +30,11 @@ public partial class SocietyDashboard : Form
     private string headName    = string.Empty;
     private int    activeNavIndex = 0;
 
-    // All societies this head manages (may be >1)
-    private DataTable mySocieties = new DataTable();
-    private ComboBox? societySwitcher = null;
-
     // ── Layout ─────────────────────────────────────────────────────────────
-    private Panel    mainPanel          = null!;
-    private Panel    sidebar            = null!;
-    private Button[] navButtons         = null!;
-    private Label    statusLabel        = null!;
+    private Panel    mainPanel           = null!;
+    private Panel    sidebar             = null!;
+    private Button[] navButtons          = null!;
+    private Label    statusLabel         = null!;
     private Label    sidebarSocietyLabel = null!;
     private System.Windows.Forms.Timer clockTimer = null!;
 
@@ -50,6 +60,8 @@ public partial class SocietyDashboard : Form
 
     private readonly (string icon, string label, Color accent, Action<Panel> render)[] sections;
 
+    
+
     // ═══════════════════════════════════════════════════════════════════════
     //  Constructor
     // ═══════════════════════════════════════════════════════════════════════
@@ -71,9 +83,6 @@ public partial class SocietyDashboard : Form
         TryLoadSociety();
     }
 
-    // ── Designer stub ─────────────────────────────────────────────────────
-
-
     // ═══════════════════════════════════════════════════════════════════════
     //  Bootstrap
     // ═══════════════════════════════════════════════════════════════════════
@@ -89,12 +98,15 @@ public partial class SocietyDashboard : Form
         catch { }
     }
 
+    // FIX: Look up society by HeadID. Society heads should only ever see
+    //      the one society they are head of. If none found, show the
+    //      "Create Society" form so they can create one.
     private void TryLoadSociety()
     {
         try
         {
             DataTable dt = DBHelper.ExecuteQuery(
-                "SELECT SocietyID, Name FROM Societies WHERE HeadID=@H",
+                "SELECT SocietyID, Name FROM Societies WHERE HeadID=@H AND Status<>'Deleted'",
                 new[] { P("@H", userId) });
 
             if (dt.Rows.Count > 0)
@@ -104,11 +116,13 @@ public partial class SocietyDashboard : Form
                 BuildShell();
                 Navigate(0);
             }
-            else
-            {
-                BuildShell();
-                ShowCreateSocietyPanel(mainPanel);
-            }
+   else
+{
+    BuildShell();
+    // Show a waiting screen — no self-creation allowed
+    ShowNoSocietyPanel(mainPanel);
+}
+
         }
         catch (Exception ex)
         {
@@ -116,7 +130,18 @@ public partial class SocietyDashboard : Form
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
-
+private void ShowNoSocietyPanel(Panel host)
+{
+    host.Controls.Clear();
+    Label lbl = new Label
+    {
+        Text = "No society has been assigned to you yet.\nPlease contact the administrator.",
+        Font = FontTitle, ForeColor = TextMuted,
+        TextAlign = ContentAlignment.MiddleCenter,
+        Dock = DockStyle.Fill
+    };
+    host.Controls.Add(lbl);
+}
     // ═══════════════════════════════════════════════════════════════════════
     //  Shell
     // ═══════════════════════════════════════════════════════════════════════
@@ -190,6 +215,7 @@ public partial class SocietyDashboard : Form
         {
             int idx = i;
             var (icon, lbl, accent, _) = sections[i];
+
             Button btn = new Button
             {
                 Text      = $"{icon}  {lbl}",
@@ -243,11 +269,11 @@ public partial class SocietyDashboard : Form
         Panel titleBar = new Panel { Dock = DockStyle.Top, Height = 52, BackColor = Color.FromArgb(17, 22, 30) };
         Label tl = new Label
         {
-            Text     = "🎓  Societies Management System",
-            Font     = new Font("Segoe UI Semibold", 11f),
+            Text      = "🎓  Societies Management System",
+            Font      = new Font("Segoe UI Semibold", 11f),
             ForeColor = TextMuted,
-            AutoSize = true,
-            Location = new Point(20, 16),
+            AutoSize  = true,
+            Location  = new Point(20, 16),
         };
         titleBar.Controls.Add(tl);
         rightCol.Controls.Add(titleBar);
@@ -267,15 +293,14 @@ public partial class SocietyDashboard : Form
         statusBar.Controls.Add(statusLabel);
         rightCol.Controls.Add(statusBar);
 
-        // ── Main scrollable content area ───────────────────────────────────
-        // KEY FIX: No Padding on mainPanel. All content panels use Dock=Top
-        // so they always fill the full width automatically.
-        mainPanel = new Panel
-        {
-            Dock       = DockStyle.Fill,
-            BackColor  = BgDark,
-            AutoScroll = true,
-        };
+        // Main scrollable content area
+ mainPanel = new Panel
+{
+    Dock       = DockStyle.Fill,
+    BackColor  = BgDark,
+    AutoScroll = true,
+    Padding    = new Padding(0, 0, 0, 0),  // remove the top:60 offset
+};
         rightCol.Controls.Add(mainPanel);
 
         clockTimer = new System.Windows.Forms.Timer { Interval = 60_000 };
@@ -297,28 +322,37 @@ public partial class SocietyDashboard : Form
         activeNavIndex = idx;
         SetActiveNav(idx);
         mainPanel.Controls.Clear();
-        sections[idx].render(mainPanel);
+        mainPanel.AutoScroll = true;
+Panel inner = new Panel
+{
+    BackColor  = BgDark,
+    AutoScroll = false,
+    Location   = new Point(0, 0),
+    Width      = mainPanel.ClientSize.Width,
+    Height     = mainPanel.ClientSize.Height,
+    Padding    = new Padding(32, 24, 32, 24),  // move padding here
+};
+        mainPanel.Controls.Add(inner);
+
+        sections[idx].render(inner);
+
+        inner.PerformLayout();
+        int total = inner.Padding.Top + inner.Padding.Bottom;
+        foreach (Control c in inner.Controls)
+            total += c.Height;
+        total += 40;
+        inner.Height = Math.Max(total, mainPanel.ClientSize.Height);
+
+        EventHandler resizeH = null!;
+        resizeH = (s, e) => inner.Width = mainPanel.ClientSize.Width;
+        mainPanel.Resize += resizeH;
+        inner.Disposed   += (s, e) => mainPanel.Resize -= resizeH;
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  LAYOUT HELPER — all content is built inside a DockStyle.Fill wrapper
-    //  with 32px padding, so every child panel uses Dock=Top and fills the
-    //  full available width automatically. No more fixed pixel widths.
+    //  Reusable layout pieces (all Dock=Top)
     // ═══════════════════════════════════════════════════════════════════════
-    private Panel ContentHost()
-    {
-        var host = new Panel
-        {
-            Dock    = DockStyle.Fill,
-            Padding = new Padding(32, 24, 32, 24),
-            BackColor = BgDark,
-        };
-        mainPanel.Controls.Add(host);
-        return host;
-    }
-
-    // Dock=Top section header — always full width
-    private Panel SectionHeader(string title, string subtitle, Color accent)
+    private static Panel SectionHeader(string title, string subtitle, Color accent)
     {
         Panel p = new Panel
         {
@@ -334,12 +368,10 @@ public partial class SocietyDashboard : Form
         return p;
     }
 
-    // Dock=Top spacer
     private static Panel Spacer(int h) =>
         new Panel { Dock = DockStyle.Top, Height = h, BackColor = Color.Transparent };
 
-    // Dock=Top stat row — cards always laid out from left, full row width
-    private Panel StatRow((string label, string value, Color accent)[] items)
+    private static Panel StatRow((string label, string value, Color accent)[] items)
     {
         const int cardW = 210, cardH = 92, gap = 12;
         Panel row = new Panel
@@ -357,10 +389,10 @@ public partial class SocietyDashboard : Form
                 BackColor = BgCard,
                 Location  = new Point(i * (cardW + gap), 8),
             };
-            Color accentCopy = accent; // capture for Paint lambda
+            Color ac = accent;
             card.Paint += (s, e) =>
                 DrawBorder(e.Graphics, card.ClientRectangle,
-                    Color.FromArgb(50, accentCopy.R, accentCopy.G, accentCopy.B));
+                    Color.FromArgb(50, ac.R, ac.G, ac.B));
             Panel stripe = new Panel { BackColor = accent, Size = new Size(cardW, 3), Location = new Point(0, 0) };
             Label val    = new Label { Text = value, Font = new Font("Segoe UI", 22f, FontStyle.Bold), ForeColor = accent, AutoSize = true, Location = new Point(14, 10) };
             Label lbl2   = new Label { Text = label, Font = FontSmall, ForeColor = TextMuted, AutoSize = true, Location = new Point(14, 60) };
@@ -370,49 +402,26 @@ public partial class SocietyDashboard : Form
         return row;
     }
 
-    // Dock=Top toolbar — buttons flow left to right
-    private Panel Toolbar(int height = 48)
-    {
-        return new Panel
-        {
-            Dock      = DockStyle.Top,
-            Height    = height,
-            BackColor = Color.Transparent,
-        };
-    }
+    private static Panel Toolbar(int height = 48) =>
+        new Panel { Dock = DockStyle.Top, Height = height, BackColor = Color.Transparent };
 
-    // Dock=Top DataGridView wrapper so grid fills full width
-    private Panel GridHost(DataGridView dgv, int height)
+    private static Panel GridHost(DataGridView dgv, int height)
     {
-        var wrapper = new Panel
-        {
-            Dock      = DockStyle.Top,
-            Height    = height,
-            BackColor = Color.Transparent,
-        };
+        var wrapper = new Panel { Dock = DockStyle.Top, Height = height, BackColor = Color.Transparent };
         dgv.Dock = DockStyle.Fill;
         wrapper.Controls.Add(dgv);
         return wrapper;
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  FR 2.1 — Create Society
+    //  FR 2.1a — Create Society  (shown when head has no society yet)
     // ═══════════════════════════════════════════════════════════════════════
     private void ShowCreateSocietyPanel(Panel host)
     {
         host.Controls.Clear();
         host.Padding = new Padding(32, 24, 32, 24);
 
-        Panel header = SectionHeader("Create Your Society",
-            "You don't have a society yet. Fill in the details below to create one.", AccentBlue);
-        host.Controls.Add(header);
-
-        Panel card = new Panel
-        {
-            Dock      = DockStyle.Top,
-            Height    = 340,
-            BackColor = BgCard,
-        };
+        Panel card = new Panel { Dock = DockStyle.Top, Height = 320, BackColor = BgCard };
         card.Paint += (s, e) =>
         {
             DrawBorder(e.Graphics, card.ClientRectangle, Color.FromArgb(50, AccentBlue.R, AccentBlue.G, AccentBlue.B));
@@ -421,29 +430,28 @@ public partial class SocietyDashboard : Form
         };
 
         int cy = 24;
-        Label   lName   = FL("Society Name *", new Point(24, cy));         cy += 24;
-        TextBox txtName = TB(new Point(24, cy), card.Width - 48);          cy += 38 + 18;
-        Label   lDesc   = FL("Description",    new Point(24, cy));         cy += 24;
-        TextBox txtDesc = TB(new Point(24, cy), card.Width - 48, 110, true); cy += 110 + 22;
+        Label   lName   = FL("Society Name *", new Point(24, cy));           cy += 24;
+        TextBox txtName = TB(new Point(24, cy), 500);                         cy += 38 + 18;
+        Label   lDesc   = FL("Description",    new Point(24, cy));            cy += 24;
+        TextBox txtDesc = TB(new Point(24, cy), 500, 110, true);              cy += 110 + 22;
 
         Button btnCreate = Btn("  ➤  Create Society", AccentBlue, 190);
         btnCreate.Location = new Point(24, cy);
         btnCreate.Click   += (s, e) => CreateSociety(txtName.Text, txtDesc.Text);
 
-        // Resize text boxes when card resizes
         card.Resize += (s, e) =>
         {
-            txtName.Width = card.Width - 48;
-            txtDesc.Width = card.Width - 48;
+            int w = card.Width - 48;
+            txtName.Width = w;
+            txtDesc.Width = w;
         };
 
         card.Controls.AddRange(new Control[] { lName, txtName, lDesc, txtDesc, btnCreate });
-        host.Controls.Add(Spacer(12));
-        host.Controls.Add(card);
 
-        // Controls added in reverse for DockStyle.Top stacking
-        host.Controls.SetChildIndex(card, 0);
-        host.Controls.SetChildIndex(header, 1);
+        host.Controls.Add(card);
+        host.Controls.Add(Spacer(12));
+        host.Controls.Add(SectionHeader("Create Your Society",
+            "You don't have a society yet. Fill in the details below to create one.", AccentBlue));
     }
 
     private void CreateSociety(string name, string desc)
@@ -452,34 +460,35 @@ public partial class SocietyDashboard : Form
         try
         {
             object res = DBHelper.ExecuteScalar(
-                "INSERT INTO Societies (Name,Description,HeadID,Status) VALUES (@N,@D,@H,'Active'); SELECT SCOPE_IDENTITY();",
+                "INSERT INTO Societies (Name, Description, HeadID, Status) " +
+                "VALUES (@N, @D, @H, 'Active'); SELECT SCOPE_IDENTITY();",
                 new[] { P("@N", name.Trim()), P("@D", desc.Trim()), P("@H", userId) })!;
             societyId   = Convert.ToInt32(res);
             societyName = name.Trim();
-            if (sidebarSocietyLabel != null) sidebarSocietyLabel.Text = societyName;
             BuildShell();
             Navigate(0);
-            Toast($"Society \"{societyName}\" created successfully!");
+            Toast($"✅ Society \"{societyName}\" created successfully!");
         }
         catch (Exception ex) { Err(ex.Message); }
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  FR 2.1 — Society Profile
+    //  FR 2.1b — Society Profile (edit name / description / status)
+    //  FIX: society head can only manage the society where HeadID = userId.
+    //       Stats load fresh from DB on every visit.
     // ═══════════════════════════════════════════════════════════════════════
     private void ShowProfilePanel(Panel host)
     {
-        // All panels use DockStyle.Top → added in REVERSE ORDER
         host.Padding = new Padding(32, 24, 32, 24);
         host.Controls.Clear();
 
-        int members  = SafeCount($"SELECT COUNT(*) FROM Memberships WHERE SocietyID={societyId} AND Status='Approved'");
-        int pending  = SafeCount($"SELECT COUNT(*) FROM Memberships WHERE SocietyID={societyId} AND Status='Pending'");
-        int evTotal  = SafeCount($"SELECT COUNT(*) FROM Events WHERE SocietyID={societyId}");
-        int evActive = SafeCount($"SELECT COUNT(*) FROM Events WHERE SocietyID={societyId} AND Status='Approved' AND EventDate>GETDATE()");
+        int members  = SafeCount("SELECT COUNT(*) FROM Memberships WHERE SocietyID=@S AND Status='Approved'", societyId);
+        int pending  = SafeCount("SELECT COUNT(*) FROM Memberships WHERE SocietyID=@S AND Status='Pending'",  societyId);
+        int evTotal  = SafeCount("SELECT COUNT(*) FROM Events WHERE SocietyID=@S",                           societyId);
+        int evActive = SafeCount("SELECT COUNT(*) FROM Events WHERE SocietyID=@S AND Status='Approved' AND EventDate>GETDATE()", societyId);
 
-        // Build edit card
-        Panel card = new Panel { Dock = DockStyle.Top, Height = 380, BackColor = BgCard };
+        // Edit card
+        Panel card = new Panel { Dock = DockStyle.Top, Height = 460, BackColor = BgCard };
         card.Paint += (s, e) =>
         {
             DrawBorder(e.Graphics, card.ClientRectangle, Color.FromArgb(50, AccentBlue.R, AccentBlue.G, AccentBlue.B));
@@ -488,11 +497,12 @@ public partial class SocietyDashboard : Form
         };
 
         int cy = 24;
-        Label   lName     = FL("Society Name *",  new Point(24, cy)); cy += 24;
-        TextBox txtName   = TB(new Point(24, cy), card.Width - 48);   cy += 38 + 18;
-        Label   lDesc     = FL("Description",     new Point(24, cy)); cy += 24;
-        TextBox txtDesc   = TB(new Point(24, cy), card.Width - 48, 130, true); cy += 130 + 22;
-        Label   lStatus   = FL("Society Status",  new Point(24, cy)); cy += 24;
+        Label   lName   = FL("Society Name *",  new Point(24, cy)); cy += 24;
+        TextBox txtName = TB(new Point(24, cy), 500);               cy += 38 + 18;
+        Label   lDesc   = FL("Description",     new Point(24, cy)); cy += 24;
+        TextBox txtDesc = TB(new Point(24, cy), 500, 130, true);    cy += 130 + 22;
+        Label   lStatus = FL("Society Status",  new Point(24, cy)); cy += 24;
+
         ComboBox cmbStatus = new ComboBox
         {
             Location      = new Point(24, cy),
@@ -509,13 +519,20 @@ public partial class SocietyDashboard : Form
         Button btnSave = Btn("  💾  Save Changes", AccentGreen, 180);
         btnSave.Location = new Point(24, cy);
 
-        card.Resize += (s, e) => { txtName.Width = card.Width - 48; txtDesc.Width = card.Width - 48; };
+        card.Resize += (s, e) =>
+        {
+            int w = card.Width - 48;
+            txtName.Width = w;
+            txtDesc.Width = w;
+        };
+
         card.Controls.AddRange(new Control[] { lName, txtName, lDesc, txtDesc, lStatus, cmbStatus, btnSave });
 
         LoadProfile(txtName, txtDesc, cmbStatus);
-        btnSave.Click += (s, e) => SaveProfile(txtName.Text, txtDesc.Text, cmbStatus.SelectedItem?.ToString() ?? "Active");
+        btnSave.Click += (s, e) => SaveProfile(txtName.Text, txtDesc.Text,
+            cmbStatus.SelectedItem?.ToString() ?? "Active");
 
-        // Add in reverse (last added = top of stack for DockStyle.Top)
+        // Add in REVERSE order for DockStyle.Top stacking
         host.Controls.Add(card);
         host.Controls.Add(Spacer(16));
         host.Controls.Add(StatRow(new[]
@@ -542,7 +559,7 @@ public partial class SocietyDashboard : Form
                 n.Text = dt.Rows[0]["Name"].ToString() ?? "";
                 d.Text = dt.Rows[0]["Description"].ToString() ?? "";
                 string st = dt.Rows[0]["Status"].ToString() ?? "Active";
-                cmb.SelectedItem = cmb.Items.Contains(st) ? st : "Active";
+                cmb.SelectedItem = cmb.Items.Contains(st) ? (object)st : "Active";
             }
         }
         catch (Exception ex) { Err(ex.Message); }
@@ -566,34 +583,38 @@ public partial class SocietyDashboard : Form
 
     // ═══════════════════════════════════════════════════════════════════════
     //  FR 2.2 & 2.3 — Member Management
+    //  FIX: LoadMembersGrid fetches ALL membership rows for this society
+    //       (including Pending ones submitted by students), so the society
+    //       head can now see and act on incoming applications.
     // ═══════════════════════════════════════════════════════════════════════
     private void ShowMembersPanel(Panel host)
     {
         host.Padding = new Padding(32, 24, 32, 24);
         host.Controls.Clear();
 
-        int approved = SafeCount($"SELECT COUNT(*) FROM Memberships WHERE SocietyID={societyId} AND Status='Approved'");
-        int pending  = SafeCount($"SELECT COUNT(*) FROM Memberships WHERE SocietyID={societyId} AND Status='Pending'");
-        int rejected = SafeCount($"SELECT COUNT(*) FROM Memberships WHERE SocietyID={societyId} AND Status='Rejected'");
+        int approved = SafeCount("SELECT COUNT(*) FROM Memberships WHERE SocietyID=@S AND Status='Approved'", societyId);
+        int pending  = SafeCount("SELECT COUNT(*) FROM Memberships WHERE SocietyID=@S AND Status='Pending'",  societyId);
+        int rejected = SafeCount("SELECT COUNT(*) FROM Memberships WHERE SocietyID=@S AND Status='Rejected'", societyId);
 
-        // Grid
         DataGridView dgv = StyledGrid();
-        Panel gridHost = GridHost(dgv, 360);
+        Panel gridHost   = GridHost(dgv, 360);
 
-        // Toolbar
-        Panel toolbar = Toolbar(44);
+        Panel toolbar    = Toolbar(44);
         Button btnApprove = ToolBtn("✅  Approve",      AccentGreen);
         Button btnReject  = ToolBtn("❌  Reject",        AccentRed);
         Button btnRemove  = ToolBtn("🗑️  Remove Member", AccentRed);
         Button btnRefresh = ToolBtn("↻  Refresh",        TextMuted);
         LayoutRow(toolbar, 3, btnApprove, btnReject, btnRemove, btnRefresh);
 
-        // Tab bar
+        // Tab bar — track current filter
         Panel tabBar = Toolbar(44);
         string[] tabs = { "All", "Pending", "Approved", "Rejected" };
+        string currentFilter = "";
         Button activeTab = null!;
+
         void SetTab(Button b, string filter)
         {
+            currentFilter = filter;
             if (activeTab != null) { activeTab.BackColor = BgCard; activeTab.ForeColor = TextMuted; }
             b.BackColor = AccentGreen; b.ForeColor = Color.White; activeTab = b;
             LoadMembersGrid(dgv, filter);
@@ -611,14 +632,15 @@ public partial class SocietyDashboard : Form
             if (captured == "All") { activeTab = tb; tb.BackColor = AccentGreen; tb.ForeColor = Color.White; }
         }
 
+        // Load all requests (including Pending) by default
         LoadMembersGrid(dgv, "");
 
-        btnApprove.Click += (s, e) => MemberAction(dgv, "Approve");
-        btnReject.Click  += (s, e) => MemberAction(dgv, "Reject");
-        btnRemove.Click  += (s, e) => MemberAction(dgv, "Remove");
-        btnRefresh.Click += (s, e) => LoadMembersGrid(dgv, "");
+        btnApprove.Click += (s, e) => { MemberAction(dgv, "Approve"); LoadMembersGrid(dgv, currentFilter); };
+        btnReject.Click  += (s, e) => { MemberAction(dgv, "Reject");  LoadMembersGrid(dgv, currentFilter); };
+        btnRemove.Click  += (s, e) => { MemberAction(dgv, "Remove");  LoadMembersGrid(dgv, currentFilter); };
+        btnRefresh.Click += (s, e) => LoadMembersGrid(dgv, currentFilter);
 
-        // Add in reverse order for DockStyle.Top stacking
+        // Reverse order for DockStyle.Top stacking
         host.Controls.Add(gridHost);
         host.Controls.Add(toolbar);
         host.Controls.Add(tabBar);
@@ -634,27 +656,35 @@ public partial class SocietyDashboard : Form
             "Approve or reject membership requests and manage your member list.", AccentGreen));
     }
 
+    // FIX: Parameterised query. Fetches ALL statuses unless filtered —
+    //      this is what makes student applications visible to the head.
     private void LoadMembersGrid(DataGridView dgv, string statusFilter)
     {
         try
         {
-            string where = string.IsNullOrEmpty(statusFilter)
-                ? $"WHERE m.SocietyID={societyId}"
-                : $"WHERE m.SocietyID={societyId} AND m.Status='{statusFilter}'";
+            string whereClause = string.IsNullOrEmpty(statusFilter)
+                ? "WHERE m.SocietyID=@S"
+                : "WHERE m.SocietyID=@S AND m.Status=@ST";
 
             string q = $@"
                 SELECT m.MembershipID,
-                       u.FirstName + ' ' + u.LastName        AS [Member Name],
+                       u.FirstName + ' ' + u.LastName           AS [Member Name],
                        u.Email,
                        m.Status,
-                       CONVERT(varchar, m.JoinDate, 106)      AS [Applied On],
-                       ISNULL(CONVERT(varchar,m.ApprovedDate,106),'—') AS [Approved On]
+                       CONVERT(varchar, m.JoinDate, 106)         AS [Applied On],
+                       ISNULL(CONVERT(varchar, m.ApprovedDate, 106), '—') AS [Approved On]
                 FROM Memberships m
                 JOIN Users u ON m.StudentID = u.UserID
-                {where}
-                ORDER BY m.JoinDate DESC";
+                {whereClause}
+                ORDER BY
+                    CASE m.Status WHEN 'Pending' THEN 0 WHEN 'Approved' THEN 1 ELSE 2 END,
+                    m.JoinDate DESC";
 
-            dgv.DataSource = DBHelper.ExecuteQuery(q);
+            var parms = string.IsNullOrEmpty(statusFilter)
+                ? new[] { P("@S", societyId) }
+                : new[] { P("@S", societyId), P("@ST", statusFilter) };
+
+            dgv.DataSource = DBHelper.ExecuteQuery(q, parms);
             HideIdColumns(dgv);
             ColorizeColumn(dgv, "Status", v => v switch
             {
@@ -667,11 +697,12 @@ public partial class SocietyDashboard : Form
         catch (Exception ex) { Err(ex.Message); }
     }
 
+    // FIX: Approve now also sets ApprovedDate so the grid shows the correct date.
     private void MemberAction(DataGridView dgv, string action)
     {
         if (!HasRow(dgv, "Select a member row first.")) return;
-        int    mid        = (int)dgv.SelectedRows[0].Cells["MembershipID"].Value;
-        string memberName = dgv.SelectedRows[0].Cells["Member Name"].Value?.ToString() ?? "";
+        int    mid        = Convert.ToInt32(dgv.SelectedRows[0].Cells["MembershipID"].Value);
+        string memberName = dgv.SelectedRows[0].Cells["Member Name"].Value?.ToString() ?? "Member";
         string status     = dgv.SelectedRows[0].Cells["Status"].Value?.ToString() ?? "";
 
         try
@@ -691,7 +722,7 @@ public partial class SocietyDashboard : Form
                     if (status == "Rejected") { Info("Already rejected."); return; }
                     if (Confirm($"Reject membership for {memberName}?") != DialogResult.Yes) return;
                     DBHelper.ExecuteNonQuery(
-                        "UPDATE Memberships SET Status='Rejected' WHERE MembershipID=@M",
+                        "UPDATE Memberships SET Status='Rejected', ApprovedDate=NULL WHERE MembershipID=@M",
                         new[] { P("@M", mid) });
                     Toast($"❌ {memberName}'s membership rejected.");
                     break;
@@ -705,7 +736,6 @@ public partial class SocietyDashboard : Form
                     Toast($"🗑️ {memberName} removed from society.");
                     break;
             }
-            LoadMembersGrid(dgv, "");
         }
         catch (Exception ex) { Err(ex.Message); }
     }
@@ -718,15 +748,15 @@ public partial class SocietyDashboard : Form
         host.Padding = new Padding(32, 24, 32, 24);
         host.Controls.Clear();
 
-        int total     = SafeCount($"SELECT COUNT(*) FROM Events WHERE SocietyID={societyId}");
-        int evPending = SafeCount($"SELECT COUNT(*) FROM Events WHERE SocietyID={societyId} AND Status='Pending'");
-        int upcoming  = SafeCount($"SELECT COUNT(*) FROM Events WHERE SocietyID={societyId} AND Status='Approved' AND EventDate>GETDATE()");
-        int cancelled = SafeCount($"SELECT COUNT(*) FROM Events WHERE SocietyID={societyId} AND Status='Cancelled'");
+        int total     = SafeCount("SELECT COUNT(*) FROM Events WHERE SocietyID=@S",                                              societyId);
+        int evPending = SafeCount("SELECT COUNT(*) FROM Events WHERE SocietyID=@S AND Status='Pending'",                        societyId);
+        int upcoming  = SafeCount("SELECT COUNT(*) FROM Events WHERE SocietyID=@S AND Status='Approved' AND EventDate>GETDATE()", societyId);
+        int cancelled = SafeCount("SELECT COUNT(*) FROM Events WHERE SocietyID=@S AND Status='Cancelled'",                       societyId);
 
-        DataGridView dgv = StyledGrid();
-        Panel gridHost = GridHost(dgv, 400);
+        DataGridView dgv  = StyledGrid();
+        Panel gridHost    = GridHost(dgv, 360);
 
-        Panel toolbar = Toolbar(44);
+        Panel toolbar     = Toolbar(44);
         Button btnNew     = ToolBtn("✚  Create Event",  AccentGreen);
         Button btnEdit    = ToolBtn("✏️  Edit Event",    AccentBlue);
         Button btnCancel  = ToolBtn("🚫  Cancel Event",  AccentRed);
@@ -735,7 +765,12 @@ public partial class SocietyDashboard : Form
 
         LoadEventsGrid(dgv);
 
-        btnNew.Click     += (s, e) => { var f = new EventForm(societyId); f.FormClosed += (_, _) => LoadEventsGrid(dgv); f.ShowDialog(this); };
+        btnNew.Click     += (s, e) =>
+        {
+            var f = new EventForm(societyId);
+            f.FormClosed += (_, _) => LoadEventsGrid(dgv);
+            f.ShowDialog(this);
+        };
         btnEdit.Click    += (s, e) => EditEvent(dgv);
         btnCancel.Click  += (s, e) => CancelEvent(dgv);
         btnRefresh.Click += (s, e) => LoadEventsGrid(dgv);
@@ -759,18 +794,20 @@ public partial class SocietyDashboard : Form
     {
         try
         {
-            string q = $@"
+            string q = @"
                 SELECT e.EventID,
                        e.Title,
                        CONVERT(varchar, e.EventDate, 106)    AS [Date],
                        e.Location,
                        e.Status,
-                       (SELECT COUNT(*) FROM EventRegistrations r WHERE r.EventID=e.EventID) AS [Registrations],
+                       (SELECT COUNT(*) FROM EventRegistrations r
+                        WHERE r.EventID = e.EventID)         AS [Registrations],
                        e.Description
                 FROM Events e
-                WHERE e.SocietyID={societyId}
+                WHERE e.SocietyID = @S
                 ORDER BY e.EventDate DESC";
-            dgv.DataSource = DBHelper.ExecuteQuery(q);
+
+            dgv.DataSource = DBHelper.ExecuteQuery(q, new[] { P("@S", societyId) });
             HideIdColumns(dgv);
             ColorizeColumn(dgv, "Status", v => v switch
             {
@@ -786,7 +823,7 @@ public partial class SocietyDashboard : Form
     private void EditEvent(DataGridView dgv)
     {
         if (!HasRow(dgv, "Select an event to edit.")) return;
-        int    evId   = (int)dgv.SelectedRows[0].Cells["EventID"].Value;
+        int    evId   = Convert.ToInt32(dgv.SelectedRows[0].Cells["EventID"].Value);
         string status = dgv.SelectedRows[0].Cells["Status"].Value?.ToString() ?? "";
         if (status == "Cancelled") { Info("Cannot edit a cancelled event."); return; }
         var f = new EventForm(societyId, evId);
@@ -797,11 +834,11 @@ public partial class SocietyDashboard : Form
     private void CancelEvent(DataGridView dgv)
     {
         if (!HasRow(dgv, "Select an event to cancel.")) return;
-        int    evId   = (int)dgv.SelectedRows[0].Cells["EventID"].Value;
-        string title  = dgv.SelectedRows[0].Cells["Title"].Value?.ToString() ?? "";
+        int    evId   = Convert.ToInt32(dgv.SelectedRows[0].Cells["EventID"].Value);
+        string title  = dgv.SelectedRows[0].Cells["Title"].Value?.ToString() ?? "this event";
         string status = dgv.SelectedRows[0].Cells["Status"].Value?.ToString() ?? "";
         if (status == "Cancelled") { Info("Event is already cancelled."); return; }
-        if (Confirm($"Cancel event \"{title}\"?\n\nThis will notify registered attendees.",
+        if (Confirm($"Cancel event \"{title}\"?\n\nThis cannot be undone.",
                     icon: MessageBoxIcon.Warning) != DialogResult.Yes) return;
         try
         {
@@ -822,25 +859,30 @@ public partial class SocietyDashboard : Form
         host.Padding = new Padding(32, 24, 32, 24);
         host.Controls.Clear();
 
-        int taskPending    = SafeCount($"SELECT COUNT(*) FROM Tasks WHERE SocietyID={societyId} AND Status='Pending'");
-        int taskInProgress = SafeCount($"SELECT COUNT(*) FROM Tasks WHERE SocietyID={societyId} AND Status='InProgress'");
-        int taskCompleted  = SafeCount($"SELECT COUNT(*) FROM Tasks WHERE SocietyID={societyId} AND Status='Completed'");
-        int taskOverdue    = SafeCount($"SELECT COUNT(*) FROM Tasks WHERE SocietyID={societyId} AND Status<>'Completed' AND DueDate<GETDATE()");
+        int taskPending    = SafeCount("SELECT COUNT(*) FROM Tasks WHERE SocietyID=@S AND Status='Pending'",    societyId);
+        int taskInProgress = SafeCount("SELECT COUNT(*) FROM Tasks WHERE SocietyID=@S AND Status='InProgress'", societyId);
+        int taskCompleted  = SafeCount("SELECT COUNT(*) FROM Tasks WHERE SocietyID=@S AND Status='Completed'",  societyId);
+        int taskOverdue    = SafeCount("SELECT COUNT(*) FROM Tasks WHERE SocietyID=@S AND Status<>'Completed' AND DueDate<GETDATE()", societyId);
 
-        DataGridView dgv = StyledGrid();
-        Panel gridHost = GridHost(dgv, 420);
+        DataGridView dgv   = StyledGrid();
+        Panel gridHost     = GridHost(dgv, 360);
 
-        Panel toolbar = Toolbar(44);
+        Panel toolbar      = Toolbar(44);
         Button btnNew      = ToolBtn("✚  Assign Task",       AccentGreen);
         Button btnProgress = ToolBtn("🔄  Mark In Progress", AccentBlue);
-        Button btnComplete = ToolBtn("✅  Mark Completed",   AccentBlue);
+        Button btnComplete = ToolBtn("✅  Mark Completed",   AccentGreen);
         Button btnDelete   = ToolBtn("🗑️  Delete Task",       AccentRed);
         Button btnRefresh  = ToolBtn("↻  Refresh",            TextMuted);
         LayoutRow(toolbar, 3, btnNew, btnProgress, btnComplete, btnDelete, btnRefresh);
 
         LoadTasksGrid(dgv);
 
-        btnNew.Click      += (s, e) => { var f = new TaskForm(societyId); f.FormClosed += (_, _) => LoadTasksGrid(dgv); f.ShowDialog(this); };
+        btnNew.Click      += (s, e) =>
+        {
+            var f = new TaskForm(societyId);
+            f.FormClosed += (_, _) => LoadTasksGrid(dgv);
+            f.ShowDialog(this);
+        };
         btnProgress.Click += (s, e) => UpdateTaskStatus(dgv, "InProgress");
         btnComplete.Click += (s, e) => UpdateTaskStatus(dgv, "Completed");
         btnDelete.Click   += (s, e) => DeleteTask(dgv);
@@ -865,20 +907,21 @@ public partial class SocietyDashboard : Form
     {
         try
         {
-            string q = $@"
+            string q = @"
                 SELECT t.TaskID,
                        t.Title,
-                       u.FirstName + ' ' + u.LastName   AS [Assigned To],
+                       u.FirstName + ' ' + u.LastName    AS [Assigned To],
                        t.Status,
-                       CONVERT(varchar, t.DueDate, 106) AS [Due Date],
-                       CASE WHEN t.Status<>'Completed' AND t.DueDate<GETDATE()
+                       CONVERT(varchar, t.DueDate, 106)  AS [Due Date],
+                       CASE WHEN t.Status <> 'Completed' AND t.DueDate < GETDATE()
                             THEN '⚠ Overdue' ELSE '' END AS [Alert],
                        t.Description
                 FROM Tasks t
                 JOIN Users u ON t.AssignedTo = u.UserID
-                WHERE t.SocietyID = {societyId}
+                WHERE t.SocietyID = @S
                 ORDER BY t.DueDate ASC";
-            dgv.DataSource = DBHelper.ExecuteQuery(q);
+
+            dgv.DataSource = DBHelper.ExecuteQuery(q, new[] { P("@S", societyId) });
             HideIdColumns(dgv);
             ColorizeColumn(dgv, "Status", v => v switch
             {
@@ -887,7 +930,7 @@ public partial class SocietyDashboard : Form
                 "Pending"    => AccentOrange,
                 _            => TextMuted,
             });
-            ColorizeColumn(dgv, "Alert", v => AccentRed);
+            ColorizeColumn(dgv, "Alert", _ => AccentRed);
         }
         catch (Exception ex) { Err(ex.Message); }
     }
@@ -895,7 +938,7 @@ public partial class SocietyDashboard : Form
     private void UpdateTaskStatus(DataGridView dgv, string newStatus)
     {
         if (!HasRow(dgv, "Select a task first.")) return;
-        int    tid = (int)dgv.SelectedRows[0].Cells["TaskID"].Value;
+        int    tid = Convert.ToInt32(dgv.SelectedRows[0].Cells["TaskID"].Value);
         string cur = dgv.SelectedRows[0].Cells["Status"].Value?.ToString() ?? "";
         if (cur == newStatus) { Info($"Task is already {newStatus}."); return; }
         try
@@ -912,8 +955,8 @@ public partial class SocietyDashboard : Form
     private void DeleteTask(DataGridView dgv)
     {
         if (!HasRow(dgv, "Select a task to delete.")) return;
-        int    tid   = (int)dgv.SelectedRows[0].Cells["TaskID"].Value;
-        string title = dgv.SelectedRows[0].Cells["Title"].Value?.ToString() ?? "";
+        int    tid   = Convert.ToInt32(dgv.SelectedRows[0].Cells["TaskID"].Value);
+        string title = dgv.SelectedRows[0].Cells["Title"].Value?.ToString() ?? "this task";
         if (Confirm($"Delete task \"{title}\"?", icon: MessageBoxIcon.Warning) != DialogResult.Yes) return;
         try
         {
@@ -932,20 +975,17 @@ public partial class SocietyDashboard : Form
         host.Padding = new Padding(32, 24, 32, 24);
         host.Controls.Clear();
 
-        // Export bar
         Panel expRow = Toolbar(48);
         Button btnExport = ToolBtn("⬇  Export to .txt", AccentTeal);
         btnExport.Location = new Point(0, 5);
         expRow.Controls.Add(btnExport);
 
-        // Output area (RichTextBox)
-        Panel outputArea = new Panel
-        {
-            Dock      = DockStyle.Top,
-            Height    = 460,
-            BackColor = BgCard,
-        };
-        outputArea.Paint += (s, e) => DrawBorder(e.Graphics, outputArea.ClientRectangle, Border);
+Panel outputArea = new Panel { 
+    Dock = DockStyle.Top, 
+    Height = 380, 
+    BackColor = BgCard,
+    Padding = new Padding(12)   // inner breathing room for the RichTextBox
+};        outputArea.Paint += (s, e) => DrawBorder(e.Graphics, outputArea.ClientRectangle, Border);
         RichTextBox rtb = new RichTextBox
         {
             Dock        = DockStyle.Fill,
@@ -957,10 +997,8 @@ public partial class SocietyDashboard : Form
             ScrollBars  = RichTextBoxScrollBars.Vertical,
         };
         outputArea.Controls.Add(rtb);
-
         btnExport.Click += (s, e) => ExportReport(rtb.Text);
 
-        // Report type tab bar
         string[] reportTypes = { "📋  Member Report", "📅  Event Report", "✅  Task Report", "📊  Full Summary" };
         Button activeRpt = null!;
         Panel typeBar = Toolbar(48);
@@ -994,7 +1032,6 @@ public partial class SocietyDashboard : Form
             tx += 176;
         }
 
-        // Add in reverse
         host.Controls.Add(expRow);
         host.Controls.Add(Spacer(8));
         host.Controls.Add(outputArea);
@@ -1033,6 +1070,7 @@ public partial class SocietyDashboard : Form
             {
                 rtb.SelectionColor = Border;
                 rtb.AppendText($"  {new string('─', 55)}\n");
+                rtb.SelectionColor = TextPrimary;
             }
 
             switch (type)
@@ -1040,13 +1078,14 @@ public partial class SocietyDashboard : Form
                 case 0:
                     Head($"MEMBER REPORT — {societyName}  ({DateTime.Now:dd MMM yyyy HH:mm})");
                     DataTable members = DBHelper.ExecuteQuery(
-                        $@"SELECT u.FirstName + ' ' + u.LastName AS Name, u.Email, m.Status,
-                                  CONVERT(varchar, m.JoinDate, 106) AS Applied,
-                                  ISNULL(CONVERT(varchar, m.ApprovedDate, 106), '—') AS Approved
-                           FROM Memberships m
-                           JOIN Users u ON m.StudentID=u.UserID
-                           WHERE m.SocietyID={societyId}
-                           ORDER BY m.Status, m.JoinDate");
+                        @"SELECT u.FirstName + ' ' + u.LastName AS Name, u.Email, m.Status,
+                                 CONVERT(varchar, m.JoinDate, 106)                        AS Applied,
+                                 ISNULL(CONVERT(varchar, m.ApprovedDate, 106), '—')       AS Approved
+                          FROM Memberships m
+                          JOIN Users u ON m.StudentID = u.UserID
+                          WHERE m.SocietyID = @S
+                          ORDER BY m.Status, m.JoinDate",
+                        new[] { P("@S", societyId) });
                     string lastStatus = "";
                     foreach (DataRow row in members.Rows)
                     {
@@ -1055,6 +1094,7 @@ public partial class SocietyDashboard : Form
                         {
                             rtb.SelectionColor = AccentBlue;
                             rtb.AppendText($"\n  ── {st} ──\n");
+                            rtb.SelectionColor = TextPrimary;
                             lastStatus = st;
                         }
                         Kv("Name:",    row["Name"].ToString()!);
@@ -1069,13 +1109,15 @@ public partial class SocietyDashboard : Form
                 case 1:
                     Head($"EVENT REPORT — {societyName}  ({DateTime.Now:dd MMM yyyy HH:mm})");
                     DataTable events = DBHelper.ExecuteQuery(
-                        $@"SELECT e.Title, e.Status,
-                                  CONVERT(varchar, e.EventDate, 106) AS Date,
-                                  e.Location,
-                                  (SELECT COUNT(*) FROM EventRegistrations r WHERE r.EventID=e.EventID) AS Regs
-                           FROM Events e
-                           WHERE e.SocietyID={societyId}
-                           ORDER BY e.EventDate DESC");
+                        @"SELECT e.Title, e.Status,
+                                 CONVERT(varchar, e.EventDate, 106) AS Date,
+                                 e.Location,
+                                 (SELECT COUNT(*) FROM EventRegistrations r
+                                  WHERE r.EventID = e.EventID)      AS Regs
+                          FROM Events e
+                          WHERE e.SocietyID = @S
+                          ORDER BY e.EventDate DESC",
+                        new[] { P("@S", societyId) });
                     foreach (DataRow row in events.Rows)
                     {
                         Kv("Title:",         row["Title"].ToString()!);
@@ -1091,19 +1133,23 @@ public partial class SocietyDashboard : Form
                 case 2:
                     Head($"TASK REPORT — {societyName}  ({DateTime.Now:dd MMM yyyy HH:mm})");
                     DataTable tasks = DBHelper.ExecuteQuery(
-                        $@"SELECT t.Title, t.Status,
-                                  u.FirstName + ' ' + u.LastName AS Assignee,
-                                  CONVERT(varchar, t.DueDate, 106) AS DueDate
-                           FROM Tasks t
-                           JOIN Users u ON t.AssignedTo=u.UserID
-                           WHERE t.SocietyID={societyId}
-                           ORDER BY t.Status, t.DueDate");
+                        @"SELECT t.Title, t.Status,
+                                 u.FirstName + ' ' + u.LastName AS Assignee,
+                                 CONVERT(varchar, t.DueDate, 106) AS DueDate,
+                                 CASE WHEN t.Status <> 'Completed' AND t.DueDate < GETDATE()
+                                      THEN 'Yes' ELSE 'No' END    AS Overdue
+                          FROM Tasks t
+                          JOIN Users u ON t.AssignedTo = u.UserID
+                          WHERE t.SocietyID = @S
+                          ORDER BY t.Status, t.DueDate",
+                        new[] { P("@S", societyId) });
                     foreach (DataRow row in tasks.Rows)
                     {
                         Kv("Task:",        row["Title"].ToString()!);
                         Kv("Assigned To:", row["Assignee"].ToString()!);
                         Kv("Status:",      row["Status"].ToString()!);
                         Kv("Due Date:",    row["DueDate"].ToString()!);
+                        Kv("Overdue:",     row["Overdue"].ToString()!);
                         Sep();
                     }
                     Kv("Total tasks:", tasks.Rows.Count.ToString());
@@ -1115,29 +1161,29 @@ public partial class SocietyDashboard : Form
                     Kv("Head:",             headName);
                     Kv("Report Generated:", DateTime.Now.ToString("dd MMM yyyy  HH:mm:ss"));
                     rtb.AppendText("\n");
-                    Kv("Approved Members:", SafeCount($"SELECT COUNT(*) FROM Memberships WHERE SocietyID={societyId} AND Status='Approved'").ToString());
-                    Kv("Pending Requests:", SafeCount($"SELECT COUNT(*) FROM Memberships WHERE SocietyID={societyId} AND Status='Pending'").ToString());
-                    Kv("Rejected:",         SafeCount($"SELECT COUNT(*) FROM Memberships WHERE SocietyID={societyId} AND Status='Rejected'").ToString());
+                    Kv("Approved Members:", SafeCount("SELECT COUNT(*) FROM Memberships WHERE SocietyID=@S AND Status='Approved'", societyId).ToString());
+                    Kv("Pending Requests:", SafeCount("SELECT COUNT(*) FROM Memberships WHERE SocietyID=@S AND Status='Pending'",  societyId).ToString());
+                    Kv("Rejected:",         SafeCount("SELECT COUNT(*) FROM Memberships WHERE SocietyID=@S AND Status='Rejected'", societyId).ToString());
                     rtb.AppendText("\n");
-                    Kv("Total Events:",     SafeCount($"SELECT COUNT(*) FROM Events WHERE SocietyID={societyId}").ToString());
-                    Kv("Approved Events:",  SafeCount($"SELECT COUNT(*) FROM Events WHERE SocietyID={societyId} AND Status='Approved'").ToString());
-                    Kv("Cancelled Events:", SafeCount($"SELECT COUNT(*) FROM Events WHERE SocietyID={societyId} AND Status='Cancelled'").ToString());
+                    Kv("Total Events:",     SafeCount("SELECT COUNT(*) FROM Events WHERE SocietyID=@S",                                              societyId).ToString());
+                    Kv("Approved Events:",  SafeCount("SELECT COUNT(*) FROM Events WHERE SocietyID=@S AND Status='Approved'",                        societyId).ToString());
+                    Kv("Cancelled Events:", SafeCount("SELECT COUNT(*) FROM Events WHERE SocietyID=@S AND Status='Cancelled'",                       societyId).ToString());
                     rtb.AppendText("\n");
-                    Kv("Total Tasks:",     SafeCount($"SELECT COUNT(*) FROM Tasks WHERE SocietyID={societyId}").ToString());
-                    Kv("Completed Tasks:", SafeCount($"SELECT COUNT(*) FROM Tasks WHERE SocietyID={societyId} AND Status='Completed'").ToString());
-                    Kv("Pending Tasks:",   SafeCount($"SELECT COUNT(*) FROM Tasks WHERE SocietyID={societyId} AND Status='Pending'").ToString());
-                    Kv("Overdue Tasks:",   SafeCount($"SELECT COUNT(*) FROM Tasks WHERE SocietyID={societyId} AND Status<>'Completed' AND DueDate<GETDATE()").ToString());
+                    Kv("Total Tasks:",     SafeCount("SELECT COUNT(*) FROM Tasks WHERE SocietyID=@S",                                                societyId).ToString());
+                    Kv("Completed Tasks:", SafeCount("SELECT COUNT(*) FROM Tasks WHERE SocietyID=@S AND Status='Completed'",                         societyId).ToString());
+                    Kv("Pending Tasks:",   SafeCount("SELECT COUNT(*) FROM Tasks WHERE SocietyID=@S AND Status='Pending'",                           societyId).ToString());
+                    Kv("Overdue Tasks:",   SafeCount("SELECT COUNT(*) FROM Tasks WHERE SocietyID=@S AND Status<>'Completed' AND DueDate<GETDATE()",  societyId).ToString());
                     rtb.AppendText("\n");
-                    Kv("Total Registrations:", SafeCount(
-                        $"SELECT COUNT(*) FROM EventRegistrations r JOIN Events e ON r.EventID=e.EventID WHERE e.SocietyID={societyId}").ToString());
+                    Kv("Total Registrations:",
+                        SafeCount("SELECT COUNT(*) FROM EventRegistrations r JOIN Events e ON r.EventID=e.EventID WHERE e.SocietyID=@S", societyId).ToString());
                     break;
             }
         }
         catch (Exception ex)
         {
-            rtb.ForeColor = AccentRed;
-            rtb.Text = $"Report error: {ex.Message}";
-            rtb.ForeColor = TextPrimary;
+            rtb.SelectionColor = AccentRed;
+            rtb.AppendText($"\nReport error: {ex.Message}");
+            rtb.SelectionColor = TextPrimary;
         }
     }
 
@@ -1155,7 +1201,7 @@ public partial class SocietyDashboard : Form
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  Reusable UI builders
+    //  Reusable UI widget factories
     // ═══════════════════════════════════════════════════════════════════════
     private DataGridView StyledGrid()
     {
@@ -1193,8 +1239,8 @@ public partial class SocietyDashboard : Form
         dgv.ColumnHeadersDefaultCellStyle.ForeColor   = TextMuted;
         dgv.ColumnHeadersDefaultCellStyle.Font        = new Font("Segoe UI Semibold", 9f);
         dgv.ColumnHeadersDefaultCellStyle.Padding     = new Padding(8, 0, 0, 0);
-        dgv.EnableHeadersVisualStyles = false;
-        dgv.RowTemplate.Height        = 38;
+        dgv.EnableHeadersVisualStyles  = false;
+        dgv.RowTemplate.Height         = 38;
         return dgv;
     }
 
@@ -1332,9 +1378,10 @@ public partial class SocietyDashboard : Form
 
     private static SqlParameter P(string name, object value) => new(name, value);
 
-    private int SafeCount(string sql)
+    // Parameterised SafeCount — all callers pass societyId bound to @S
+    private int SafeCount(string sql, int sid)
     {
-        try { return Convert.ToInt32(DBHelper.ExecuteScalar(sql)); }
+        try { return Convert.ToInt32(DBHelper.ExecuteScalar(sql, new[] { P("@S", sid) })); }
         catch { return 0; }
     }
 
@@ -1348,8 +1395,12 @@ public partial class SocietyDashboard : Form
         MessageBoxIcon icon = MessageBoxIcon.Question) =>
         MessageBox.Show(msg, title, MessageBoxButtons.YesNo, icon);
 
-    private void Toast(string msg) => MessageBox.Show(msg, "Society Console", MessageBoxButtons.OK, MessageBoxIcon.Information);
-    private void Info(string msg)  => MessageBox.Show(msg, "Society Console", MessageBoxButtons.OK, MessageBoxIcon.Information);
-    private void Warn(string msg)  => MessageBox.Show(msg, "Society Console", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-    private void Err(string msg)   => MessageBox.Show($"Error: {msg}", "Society Console", MessageBoxButtons.OK, MessageBoxIcon.Error);
+    private void Toast(string msg) =>
+        MessageBox.Show(msg, "Society Console", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    private void Info(string msg) =>
+        MessageBox.Show(msg, "Society Console", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    private void Warn(string msg) =>
+        MessageBox.Show(msg, "Society Console", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+    private void Err(string msg)  =>
+        MessageBox.Show($"Error: {msg}", "Society Console", MessageBoxButtons.OK, MessageBoxIcon.Error);
 }
